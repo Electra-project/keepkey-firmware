@@ -21,10 +21,10 @@
 
 #include "keepkey/board/confirm_sm.h"
 #include "keepkey/board/layout.h"
+#include "keepkey/board/util.h"
 #include "keepkey/firmware/app_confirm.h"
 #include "keepkey/firmware/coins.h"
 #include "keepkey/firmware/crypto.h"
-#include "keepkey/firmware/util.h"
 #include "keepkey/transport/interface.h"
 #include "trezor/crypto/address.h"
 #include "trezor/crypto/base58.h"
@@ -35,6 +35,8 @@
 #include "trezor/crypto/segwit_addr.h"
 
 #include <string.h>
+
+#define _(X) (X)
 
 #define SEGWIT_VERSION_0 0
 
@@ -206,7 +208,7 @@ int compile_output(const CoinType *coin, const HDNode *root, TxOutputType *in, T
 			return 0; // failed to compile output
 		}
 		if (needs_confirm) {
-			if (!confirm_op_return(in->op_return_data.bytes, in->op_return_data.size)) {
+			if (!confirm_data(ButtonRequestType_ButtonRequest_ConfirmOutput, _("Confirm OP_RETURN"), in->op_return_data.bytes, in->op_return_data.size)) {
 				return -1; // user aborted
 			}
 		}
@@ -365,7 +367,9 @@ int compile_output(const CoinType *coin, const HDNode *root, TxOutputType *in, T
 				coin_amnt_to_str(coin, in->amount, amount_str, sizeof(amount_str));
 				memset(node_str, 0, sizeof(node_str));
 				if (!bip32_node_to_string(node_str, sizeof(node_str), coin, in->address_n,
-				                          in->address_n_count, /*whole_account=*/false))
+				                          in->address_n_count, /*whole_account=*/false,
+				                          /*allow_change=*/true,
+				                          /*show_addridx=*/true))
 					break;
 				if (!confirm_transfer_output(ButtonRequestType_ButtonRequest_ConfirmTransferToAccount, amount_str, node_str))
 					return TXOUT_CANCEL;

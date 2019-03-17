@@ -2,18 +2,19 @@ cmake_minimum_required(VERSION 3.7.2)
 
 project(KeepKeyFirmware
 
-        VERSION 5.10.1
+        VERSION 6.0.4
 
         LANGUAGES C CXX ASM)
 
-set(BOOTLOADER_MAJOR_VERSION 1)
-set(BOOTLOADER_MINOR_VERSION 1)
+set(BOOTLOADER_MAJOR_VERSION 2)
+set(BOOTLOADER_MINOR_VERSION 0)
 set(BOOTLOADER_PATCH_VERSION 0)
 
 option(KK_EMULATOR "Build the emulator" OFF)
 option(KK_DEBUG_LINK "Build with debug-link enabled" OFF)
 option(KK_HAVE_STRLCPY "Does the target platform have strlcpy?" ON)
 option(KK_HAVE_STRLCAT "Does the target platform have strlcat?" ON)
+option(KK_BUILD_FUZZERS "Build the fuzzers?" OFF)
 set(LIBOPENCM3_PATH /root/libopencm3 CACHE PATH "Path to an already-built libopencm3")
 set(PROTOC_BINARY protoc CACHE PATH "Path to the protobuf compiler binary")
 set(NANOPB_DIR /root/nanopb CACHE PATH "Path to the nanopb build")
@@ -33,6 +34,10 @@ if(NOT EXISTS ${CMAKE_SOURCE_DIR}/deps/googletest/CMakeLists.txt)
 endif()
 
 if(NOT EXISTS ${CMAKE_SOURCE_DIR}/deps/crypto/trezor-crypto/Makefile)
+    message(ERROR "Need to 'git submodule update --init --recursive")
+endif()
+
+if(NOT EXISTS ${CMAKE_SOURCE_DIR}/deps/qrenc/trezor-qrenc/Makefile)
     message(ERROR "Need to 'git submodule update --init --recursive")
 endif()
 
@@ -124,10 +129,14 @@ endif()
 add_subdirectory(lib)
 add_subdirectory(tools)
 add_subdirectory(deps/crypto)
+add_subdirectory(deps/qrenc)
 
 if(${KK_EMULATOR})
   add_subdirectory(deps/googletest)
   add_subdirectory(unittests)
+  if(${KK_BUILD_FUZZERS})
+    add_subdirectory(fuzzer)
+  endif()
 
   enable_testing()
   add_test(test-firmware ${CMAKE_BINARY_DIR}/bin/firmware-unit)

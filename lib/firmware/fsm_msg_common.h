@@ -3,6 +3,8 @@ void fsm_msgInitialize(Initialize *msg)
     (void)msg;
     recovery_abort(false);
     signing_abort();
+    ethereum_signing_abort();
+    eos_signingAbort();
     session_clear(false); // do not clear PIN
     layoutHome();
     fsm_msgGetFeatures(0);
@@ -106,39 +108,6 @@ void fsm_msgGetFeatures(GetFeatures *msg)
     msg_write(MessageType_MessageType_Features, resp);
 }
 
-static void coin_from_token(CoinType *coin, const TokenType *token) {
-    memset(coin, 0, sizeof(*coin));
-
-    coin->has_coin_name = true;
-    strncpy(&coin->coin_name[0], "ERC20", sizeof(coin->coin_name));
-
-    coin->has_coin_shortcut = true;
-    strncpy(&coin->coin_shortcut[0], token->ticker, sizeof(coin->coin_shortcut));
-
-    coin->has_forkid = true;
-    coin->forkid = token->chain_id;
-
-    coin->has_maxfee_kb = true;
-    coin->maxfee_kb = 100000;
-
-    coin->has_bip44_account_path = true;
-    coin->bip44_account_path = 0x8000003C;
-
-    coin->has_decimals = true;
-    coin->decimals = token->decimals;
-
-    coin->has_contract_address = true;
-    coin->contract_address.size = 20;
-    memcpy((char*)&coin->contract_address.bytes[0], token->address, sizeof(coin->contract_address.bytes));
-
-    coin->has_gas_limit = true;
-    coin->gas_limit.size = 32;
-    memcpy((char*)&coin->gas_limit.bytes[0], "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\xe8\x48", sizeof(coin->gas_limit.bytes));
-
-    coin->has_curve_name = true;
-    strncpy(&coin->curve_name[0], "secp256k1", sizeof(coin->curve_name));
-}
-
 void fsm_msgGetCoinTable(GetCoinTable *msg)
 {
     RESP_INIT(CoinTable);
@@ -170,7 +139,7 @@ void fsm_msgGetCoinTable(GetCoinTable *msg)
             if (msg->start + i < COINS_COUNT) {
                 resp->table[i] = coins[msg->start + i];
             } else if (msg->start + i - COINS_COUNT < TOKENS_COUNT) {
-                coin_from_token(&resp->table[i], &tokens[msg->start + i - COINS_COUNT]);
+                coinFromToken(&resp->table[i], &tokens[msg->start + i - COINS_COUNT]);
             }
         }
     }
@@ -269,24 +238,23 @@ void fsm_msgChangePin(ChangePin *msg)
         return;
     }
 
-    CHECK_PIN_TXSIGN
+    CHECK_PIN_UNCACHED
 
-    if(removal)
-    {
+    if (removal) {
         storage_setPin("");
         storage_commit();
         fsm_sendSuccess("PIN removed");
-    }
-    else
-    {
-        session_cachePin("");
-        if(change_pin())
-        {
-            storage_commit();
-            fsm_sendSuccess("PIN changed");
-        }
+        layoutHome();
+        return;
     }
 
+    if (!change_pin()) {
+        fsm_sendFailure(FailureType_Failure_ActionCancelled, "PINs do not match");
+        layoutHome();
+        return;
+    }
+    storage_commit();
+    fsm_sendSuccess("PIN changed");
     layoutHome();
 }
 
@@ -303,6 +271,7 @@ void fsm_msgWipeDevice(WipeDevice *msg)
     }
 
     /* Wipe device */
+    storage_wipe();
     storage_reset();
     storage_resetUuid();
     storage_commit();
@@ -391,7 +360,8 @@ void fsm_msgResetDevice(ResetDevice *msg)
         msg->has_language ? msg->language : 0,
         msg->has_label ? msg->label : 0,
         msg->has_no_backup ? msg->no_backup : false,
-        msg->has_auto_lock_delay_ms ? msg->auto_lock_delay_ms : STORAGE_DEFAULT_SCREENSAVER_TIMEOUT
+        msg->has_auto_lock_delay_ms ? msg->auto_lock_delay_ms : STORAGE_DEFAULT_SCREENSAVER_TIMEOUT,
+        msg->has_u2f_counter ? msg->u2f_counter : 0
     );
 }
 
@@ -413,6 +383,7 @@ void fsm_msgCancel(Cancel *msg)
     recovery_abort(true);
     signing_abort();
     ethereum_signing_abort();
+    eos_signingAbort();
     fsm_sendFailure(FailureType_Failure_ActionCancelled, "Aborted");
 }
 
@@ -435,12 +406,12 @@ void fsm_msgApplySettings(ApplySettings *msg)
     if (msg->has_use_passphrase) {
         if (msg->use_passphrase) {
             if (!confirm(ButtonRequestType_ButtonRequest_EnablePassphrase,
-                         "Enable Passphrase", "Do you want to enable passphrase encryption?")) {
+                         "Enable Passphrase", "Do you want to enable BIP39 passphrases?")) {
                 goto apply_settings_cancelled;
             }
         } else {
             if (!confirm(ButtonRequestType_ButtonRequest_DisablePassphrase,
-                         "Disable Passphrase", "Do you want to disable passphrase encryption?")) {
+                         "Disable Passphrase", "Do you want to disable BIP39 passphrases?")) {
                 goto apply_settings_cancelled;
             }
         }
@@ -456,8 +427,7 @@ void fsm_msgApplySettings(ApplySettings *msg)
 
     if (msg->has_u2f_counter) {
         if (!confirm(ButtonRequestType_ButtonRequest_U2FCounter,
-                     "Set U2F Counter", "Do you want to set the U2F Counter to %" PRIu32 "?",
-                     msg->u2f_counter)) {
+                     "Set U2F Counter", "Do you want to set the U2F Counter?")) {
             goto apply_settings_cancelled;
         }
     }
@@ -511,8 +481,8 @@ void fsm_msgRecoveryDevice(RecoveryDevice *msg)
 {
     CHECK_NOT_INITIALIZED
 
-    if(msg->has_use_character_cipher &&
-            msg->use_character_cipher == true)   // recovery via character cipher
+    if (msg->has_use_character_cipher &&
+        msg->use_character_cipher)   // recovery via character cipher
     {
         recovery_cipher_init(
             msg->has_passphrase_protection && msg->passphrase_protection,
@@ -520,11 +490,10 @@ void fsm_msgRecoveryDevice(RecoveryDevice *msg)
             msg->has_language ? msg->language : 0,
             msg->has_label ? msg->label : 0,
             msg->has_enforce_wordlist ? msg->enforce_wordlist : false,
-            msg->has_auto_lock_delay_ms ? msg->auto_lock_delay_ms : STORAGE_DEFAULT_SCREENSAVER_TIMEOUT
+            msg->has_auto_lock_delay_ms ? msg->auto_lock_delay_ms : STORAGE_DEFAULT_SCREENSAVER_TIMEOUT,
+            msg->has_u2f_counter ? msg->u2f_counter : 0
         );
-    }
-    else                                                                     // legacy way of recovery
-    {
+    } else {                                     // legacy way of recovery
         recovery_init(
             msg->has_word_count ? msg->word_count : 12,
             msg->has_passphrase_protection && msg->passphrase_protection,
@@ -532,7 +501,8 @@ void fsm_msgRecoveryDevice(RecoveryDevice *msg)
             msg->has_language ? msg->language : 0,
             msg->has_label ? msg->label : 0,
             msg->has_enforce_wordlist ? msg->enforce_wordlist : false,
-            msg->has_auto_lock_delay_ms ? msg->auto_lock_delay_ms : STORAGE_DEFAULT_SCREENSAVER_TIMEOUT
+            msg->has_auto_lock_delay_ms ? msg->auto_lock_delay_ms : STORAGE_DEFAULT_SCREENSAVER_TIMEOUT,
+            msg->has_u2f_counter ? msg->u2f_counter : 0
         );
     }
 }
@@ -544,16 +514,12 @@ void fsm_msgWordAck(WordAck *msg)
 
 void fsm_msgCharacterAck(CharacterAck *msg)
 {
-    if(msg->has_delete && msg->del)
-    {
+    if (msg->has_delete && msg->del) {
         recovery_delete_character();
-    }
-    else if(msg->has_done && msg->done)
-    {
+    } else if(msg->has_done && msg->done) {
         recovery_cipher_finalize();
-    }
-    else
-    {
+    } else {
+        msg->character[1] = '\0';
         recovery_character(msg->character);
     }
 }
@@ -578,6 +544,10 @@ void fsm_msgApplyPolicies(ApplyPolicies *msg)
         bool enabled = msg->policy[i].enabled;
         strlcat(resp->data, enabled ? ":Enable" : ":Disable", sizeof(resp->data));
 
+        // ShapeShift policy is always enabled.
+        if (strcmp(msg->policy[i].policy_name, "ShapeShift") == 0)
+            continue;
+
         if (!confirm_with_custom_button_request(
                 resp, enabled ? "Enable Policy" : "Disable Policy",
                 "Do you want to %s %s policy?",
@@ -593,6 +563,10 @@ void fsm_msgApplyPolicies(ApplyPolicies *msg)
     CHECK_PIN
 
     for (size_t i = 0; i < msg->policy_count; ++i) {
+        // ShapeShift policy is always enabled.
+        if (strcmp(msg->policy[i].policy_name, "ShapeShift") == 0)
+            continue;
+
         if (!storage_setPolicy(msg->policy[i].policy_name, msg->policy[i].enabled)) {
             fsm_sendFailure(FailureType_Failure_ActionCancelled,
                             "Policies could not be applied");

@@ -23,7 +23,7 @@
 #include "trezor/crypto/bip32.h"
 #include "keepkey/board/memory.h"
 
-#define STORAGE_VERSION 11 /* Must add case fallthrough in storage_fromFlash after increment*/
+#define STORAGE_VERSION 12 /* Must add case fallthrough in storage_fromFlash after increment*/
 #define STORAGE_RETRIES 3
 
 #define STORAGE_DEFAULT_SCREENSAVER_TIMEOUT (10U * 60U * 1000U) /* 10 minutes */
@@ -37,6 +37,9 @@ void storage_resetUuid(void);
 
 /// \brief Clear configuration.
 void storage_reset(void);
+
+/// \brief Clear storage.
+void storage_wipe(void);
 
 /// \brief Reset session states.
 /// \param clear_pin whether to clear the pin as well.

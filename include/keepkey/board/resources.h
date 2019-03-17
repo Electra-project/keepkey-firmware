@@ -20,16 +20,10 @@
 #ifndef RESOURCES_H
 #define RESOURCES_H
 
-/* === Includes ============================================================ */
 #include "keepkey/board/variant.h"
 
 #include <stdint.h>
 #include <stdbool.h>
-
-
-/* === Defines ============================================================ */
-
-/* === Functions =========================================================== */
 
 const AnimationFrame *get_confirm_icon_frame(void);
 const AnimationFrame *get_confirmed_frame(void);
@@ -38,7 +32,6 @@ const AnimationFrame *get_recovery_frame(void);
 const AnimationFrame *get_warning_frame(void);
 
 const VariantAnimation *get_confirming_animation(void);
-const VariantAnimation *get_loading_animation(void);
 const VariantAnimation *get_warning_animation(void);
 const VariantAnimation *get_logo_animation(void);
 const VariantAnimation *get_logo_reversed_animation(void);

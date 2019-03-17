@@ -20,10 +20,20 @@
 #ifndef __ETHEREUM_TOKENS_H__
 #define __ETHEREUM_TOKENS_H__
 
+#include "keepkey/board/util.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
-#define TOKENS_COUNT 797
+enum {
+#define X(CHAIN_ID, CONTRACT_ADDR, TICKER, DECIMALS) \
+    CONCAT(TokenIndex, __COUNTER__),
+#include "keepkey/firmware/ethereum_tokens.def"
+    TokenIndexLast,
+    TokenIndexFirst = 0
+};
+
+#define TOKENS_COUNT ((int)TokenIndexLast-(int)TokenIndexFirst)
 
 typedef struct _TokenType {
     uint8_t chain_id;
@@ -31,6 +41,8 @@ typedef struct _TokenType {
     const char * const ticker;
     int decimals;
 } TokenType;
+
+typedef struct _CoinType CoinType;
 
 extern const TokenType tokens[];
 
@@ -49,4 +61,5 @@ const TokenType *tokenByChainAddress(uint8_t chain_id, const uint8_t *address);
 /// \returns true iff the token can be uniquely found in the list of known tokens.
 bool tokenByTicker(uint8_t chain_id, const char *ticker, const TokenType **token);
 
+void coinFromToken(CoinType *coin, const TokenType *token);
 #endif

@@ -17,11 +17,10 @@
  * along with this library.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* === Includes ============================================================ */
 
 #include "keepkey/board/keepkey_board.h"
 #include "keepkey/board/layout.h"
-#include "keepkey/board/msg_dispatch.h"
+#include "keepkey/board/messages.h"
 #include "keepkey/firmware/fsm.h"
 #include "keepkey/firmware/home_sm.h"
 #include "keepkey/firmware/pin_sm.h"
@@ -36,7 +35,6 @@
 #include <string.h>
 #include <stdio.h>
 
-/* === Private Variables =================================================== */
 
 static uint32_t word_count;
 static bool awaiting_word = false;
@@ -47,7 +45,6 @@ static uint32_t word_index;
 static char CONFIDENTIAL word_order[24];
 static char CONFIDENTIAL words[24][12];
 
-/* === Functions =========================================================== */
 
 void next_word(void) {
 	if (sizeof(word_order)/sizeof(word_order[0]) <= word_index) {
@@ -103,7 +100,8 @@ void next_word(void) {
 
 void recovery_init(uint32_t _word_count, bool passphrase_protection,
                    bool pin_protection, const char *language, const char *label,
-                   bool _enforce_wordlist, uint32_t _auto_lock_delay_ms)
+                   bool _enforce_wordlist, uint32_t _auto_lock_delay_ms,
+                   uint32_t _u2f_counter)
 {
 	if (_word_count != 12 && _word_count != 18 && _word_count != 24) {
 		fsm_sendFailure(FailureType_Failure_SyntaxError, "Invalid word count (has to be 12, 18 or 24");
@@ -114,15 +112,21 @@ void recovery_init(uint32_t _word_count, bool passphrase_protection,
 	word_count = _word_count;
 	enforce_wordlist = _enforce_wordlist;
 
-	if (pin_protection && !change_pin()) {
-		layoutHome();
-		return;
+	if (pin_protection) {
+		if (!change_pin()) {
+			fsm_sendFailure(FailureType_Failure_ActionCancelled, "PINs do not match");
+			layoutHome();
+			return;
+		}
+	} else {
+		storage_setPin("");
 	}
 
 	storage_setPassphraseProtected(passphrase_protection);
 	storage_setLanguage(language);
 	storage_setLabel(label);
 	storage_setAutoLockDelayMs(_auto_lock_delay_ms);
+	storage_setU2FCounter(_u2f_counter);
 
 	uint32_t i;
     for (i = 0; i < word_count; i++) {
@@ -218,7 +222,6 @@ void recovery_abort(bool send_failure)
     }
 }
 
-/* === Debug Functions =========================================================== */
 
 #if DEBUG_LINK
 const char *recovery_get_fake_word(void)

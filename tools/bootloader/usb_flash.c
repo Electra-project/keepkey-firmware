@@ -17,23 +17,22 @@
  * along with this library.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* === Includes ============================================================ */
-
 #include "keepkey/board/confirm_sm.h"
 #include "keepkey/board/keepkey_board.h"
 #include "keepkey/board/keepkey_flash.h"
 #include "keepkey/board/keepkey_usart.h"
 #include "keepkey/board/memory.h"
-#include "keepkey/board/msg_dispatch.h"
+#include "keepkey/board/messages.h"
 #include "keepkey/board/pubkeys.h"
-#include "keepkey/board/usb_driver.h"
-#include "keepkey/board/u2f.h"
-#include "keepkey/board/u2f_types.h"
-#include "keepkey/bootloader/signatures.h"
+#include "keepkey/board/usb.h"
+#include "keepkey/board/signatures.h"
 #include "keepkey/bootloader/usb_flash.h"
 #include "trezor/crypto/sha2.h"
 #include "trezor/crypto/memzero.h"
 #include "keepkey/transport/interface.h"
+
+#include "keepkey/board/supervise.h"
+#include "keepkey/board/bl_mpu.h"
 
 #include <libopencm3/stm32/flash.h>
 
@@ -43,8 +42,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-/* === Variables =========================================================== */
 
 static Allocation storage_location = FLASH_INVALID;
 static RawMessageState upload_state = RAW_MESSAGE_NOT_STARTED;
@@ -86,7 +83,6 @@ static const MessagesMap_t MessagesMap[] =
 #endif
 };
 
-/* === Private Functions =================================================== */
 
 /*
  * check_firmware_hash - Checks flashed firmware's hash
@@ -147,15 +143,12 @@ static bool flash_locking_write(Allocation group, size_t offset, size_t len,
 {
     bool ret_val = true;
 
-    flash_unlock();
-
     if(!flash_write(group, offset, len, data))
     {
         /* Flash error detectected */
         ret_val = false;
     }
 
-    flash_lock();
     return(ret_val);
 }
 
@@ -249,10 +242,7 @@ bool usb_flash_firmware(void)
     layout_version(BOOTLOADER_MAJOR_VERSION, BOOTLOADER_MINOR_VERSION,
                    BOOTLOADER_PATCH_VERSION);
 
-    // U2F signing unsupported in bootloader mode. Only transport is supported.
-    u2f_init(NULL, NULL, NULL);
-
-    usb_init();
+    usbInit();
     bootloader_fsm_init();
 
     while(1)
@@ -297,7 +287,7 @@ bool usb_flash_firmware(void)
             case RAW_MESSAGE_STARTED:
             default:
             {
-                usb_poll();
+                usbPoll();
                 animate();
                 display_refresh();
             }
@@ -507,8 +497,7 @@ void handler_wipe(WipeDevice *msg)
     // Only erase the active sector, leaving the other two alone.
     Allocation storage_loc = FLASH_INVALID;
     if(find_active_storage(&storage_loc) && storage_loc != FLASH_INVALID) {
-        flash_unlock();
-        flash_erase_word(storage_loc);
+        bl_flash_erase_word(storage_loc);
         flash_lock();
     }
 
@@ -549,25 +538,26 @@ void handler_erase(FirmwareErase *msg)
 {
     (void)msg;
     if (should_erase()) {
-        layout_simple_message("Preparing For Upgrade...");
+        layoutProgress("Preparing for upgrade", 0);
 
         /* Save storage data in memory so it can be restored after firmware update */
         if(storage_preserve())
         {
-            flash_unlock();
-
             /* Erase config data sectors  */
-            for(uint32_t i = FLASH_STORAGE1; i <= FLASH_STORAGE3; i++)
-            {
-                flash_erase_word(i);
+            for (uint32_t i = FLASH_STORAGE1; i <= FLASH_STORAGE3; i++) {
+                bl_flash_erase_word(i);
+                layoutProgress("Preparing for upgrade", (i * 1000 / 9));
             }
 
             /* Erase application section */
-            flash_erase_word(FLASH_APP);
-            flash_lock();
-            send_success("Firmware erased");
+            for (int i = 7; i <= 11; ++i) {
+                bl_flash_erase_word(i);
+                layoutProgress("Preparing for upgrade", ((i + 3 - 7 + 2) * 1000 / 9));
+            }
 
-            layout_loading();
+            flash_lock();
+            layoutProgress("Preparing for upgrade", 1000);
+            send_success("Firmware erased");
         }
         else
         {
@@ -606,6 +596,8 @@ void raw_handler_upload(RawMessage *msg, uint32_t frame_length)
         /* Start firmware load */
         if(upload_state == RAW_MESSAGE_NOT_STARTED)
         {
+            layoutProgress("Uploading Firmware", 0);
+
             upload_state = RAW_MESSAGE_STARTED;
             flash_offset = 0;
 
@@ -647,6 +639,12 @@ void raw_handler_upload(RawMessage *msg, uint32_t frame_length)
                         goto rhu_exit;
                     }
 
+                }
+
+                static int update_ctr = 60;
+                if (update_ctr++ == 60) {
+                    layoutProgress("Uploading Firmware\n", flash_offset * 1000 / frame_length);
+                    update_ctr = 0;
                 }
 
                 /* Begin writing to flash */
@@ -757,11 +755,9 @@ void handler_debug_link_fill_config(DebugLinkFillConfig *msg)
     /* Fill storage sector with test data */
     if(storage_location >= FLASH_STORAGE1 && storage_location <= FLASH_STORAGE3)
     {
-        flash_unlock();
-        flash_erase_word(storage_location);
+        bl_flash_erase_word(storage_location);
         flash_write(storage_location, 0, STOR_FLASH_SECT_LEN,
                     fill_storage_shadow);
-        flash_lock();
     }
 }
 #endif

@@ -17,26 +17,14 @@
  * along with this library.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef UTIL_H
-#define UTIL_H
+#ifndef SIGNATURES_H
+#define SIGNATURES_H
 
-/* === Includes ============================================================ */
-
-#include <stdint.h>
-#include <string.h>
-#include <stdio.h>
-
-/* === Functions =========================================================== */
-
-// converts uint32 to hexa (8 digits)
-void uint32hex(uint32_t num, char *str);
-
-// converts data to hexa
-void data2hex(const void *data, uint32_t len, char *str);
-
-// read protobuf integer and advance pointer
-uint32_t readprotobufint(uint8_t **ptr);
-void rev_byte_order(uint8_t *bfr, size_t len);
-void dec64_to_str(uint64_t dec64_val, char *str);
+/// Checks firmware signatures
+///
+///  \returns SIG_OK if signatures are correct
+///  \returns KEY_EXPIRED if an expired signature was detected
+///  \returns SIG_FAIL for unrecognized signature
+int signatures_ok(void);
 
 #endif

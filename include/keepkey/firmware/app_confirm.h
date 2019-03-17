@@ -31,8 +31,7 @@
 bool confirm_cipher(bool encrypt, const char *key);
 bool confirm_encrypt_msg(const char *msg, bool signing);
 bool confirm_decrypt_msg(const char *msg, const char *address);
-bool confirm_exchange_output(const char *exchange, const char *from_amount,
-                             const char *to_amount, const char *address);
+bool confirm_exchange_output(const char *from_amount, const char *to_amount, const char *destination);
 bool confirm_transfer_output(ButtonRequestType button_request, const char *amount, const char *to);
 bool confirm_transaction_output(ButtonRequestType button_request, const char *amount, const char *to);
 bool confirm_transaction_output_no_bold(ButtonRequestType button_request,
@@ -46,5 +45,5 @@ bool confirm_address(const char *desc, const char *address);
 bool confirm_xpub(const char *node_str, const char *xpub);
 bool confirm_sign_identity(const IdentityType *identity, const char *challenge);
 bool confirm_ethereum_address(const char *desc, const char *address);
-bool confirm_op_return(const uint8_t *data, uint32_t size);
+bool confirm_data(ButtonRequestType button_request, const char *title, const uint8_t *data, uint32_t size);
 #endif
